@@ -1,6 +1,6 @@
 # streamlit_app.py
-# Full replacement: fixes prior-day ValueError, and applies black/dark UI background.
-# Drop into your repo and redeploy.
+# Dark-mode backtest app with enforced white fonts on black background.
+# Full replacement — overwrite existing file and redeploy.
 
 import streamlit as st
 import pandas as pd
@@ -16,30 +16,49 @@ try:
 except Exception:
     ta = None
 
-# ---- Page config + dark CSS ----
-st.set_page_config(page_title="Backtest Studio (Dark)", layout="wide", page_icon="📈")
+# ---- Page config + strict dark CSS (white text) ----
+st.set_page_config(page_title="Backtest Studio (Dark, White Text)", layout="wide", page_icon="📈")
 st.markdown(
     """
     <style>
+    /* Background and base text */
     html, body, .stApp, .block-container {
-      background: #000000;
-      color: #e6e6e6;
+      background: #000000 !important;
+      color: #FFFFFF !important;
     }
-    .stButton>button { background-color:#1f2937; color:#fff; }
-    .section-title { font-size:18px; font-weight:600; color:#fff; margin-bottom:6px; }
-    .muted { color: #9aa0a6; font-size:13px; }
-    .card { background:#0b0b0b; padding:12px; border-radius:8px; border:1px solid #222; }
-    .stMetric > div { color: #fff; }
-    .stDownloadButton>button { background-color:#1f2937; color:#fff; }
+    /* Headings and section titles */
+    .section-title { font-size:18px; font-weight:600; color:#FFFFFF; margin-bottom:6px; }
+    /* Muted text */
+    .muted { color: #BFC7CC; font-size:13px; }
+    /* Card background */
+    .card { background:#0b0b0b; padding:12px; border-radius:8px; border:1px solid #222; color:#FFFFFF; }
+    /* Buttons */
+    .stButton>button, .stDownloadButton>button {
+      background-color:#1f2937 !important;
+      color:#FFFFFF !important;
+      border-radius:6px !important;
+    }
+    /* Streamlit metrics & small text */
+    .stMetric > div { color: #FFFFFF !important; }
+    .stDownloadButton>button:hover { background-color:#272f3a !important; }
+    /* Dataframe/table header color */
+    .stDataFrame table thead th {
+      color: #FFFFFF !important;
+      background: #0f1720 !important;
+    }
+    /* Make links readable */
+    a { color: #7FDBFF !important; }
+    /* Ensure code blocks are readable */
+    pre, code { color: #E6E6E6 !important; background: #0b0b0b !important; }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# set matplotlib dark background
+# set matplotlib dark background and specify text color explicitly
 plt.style.use('dark_background')
 
-st.title("📈 Backtest Studio — Dark Mode")
+st.title("📈 Backtest Studio — Dark Mode (white text)")
 
 # ---- Sidebar (Run + quick env) ----
 with st.sidebar:
@@ -57,7 +76,7 @@ with st.sidebar:
                 status[m] = f"ERROR: {e}"
         st.json(status)
     st.write("---")
-    st.markdown("Dark theme applied. Use daily data for stable backtests.")
+    st.markdown("<div class='muted'>Dark theme with enforced white text. Use daily data for stable runs.</div>", unsafe_allow_html=True)
 
 # ---- Main Inputs ----
 col_left, col_right = st.columns([3,1])
@@ -87,7 +106,7 @@ with col_left:
     elif entry_method == 'Momentum (prior-day)':
         prior_day_thr = st.number_input("Prior-Day Return Entry Threshold (%)", value=0.5)/100.0
     elif entry_method == 'Custom (simple)':
-        custom_rule = st.text_input("Custom rule (example: df['Close']>df['Close'].rolling(50).mean())", value="df['Close']>df['Close'].shift(1)")
+        custom_rule = st.text_input("Custom rule (example: df['Close']>df['Close'].shift(1))", value="df['Close']>df['Close'].shift(1)")
 
     st.markdown('<div class="section-title">Exit & Risk</div>', unsafe_allow_html=True)
     profit_target = st.number_input("Profit Target (%)", value=5.0)/100.0
@@ -109,7 +128,7 @@ with col_right:
     st.markdown('<div class="card">Set parameters on the left, then click <b>Run Backtest</b> in the sidebar.</div>', unsafe_allow_html=True)
     preview = st.empty()
 
-# ---- Helper functions ----
+# ---- Helpers ----
 def normalize_ticker(t):
     if not t: raise ValueError("Ticker required")
     tu = t.strip().upper()
@@ -123,7 +142,6 @@ def fetch_data(ticker, start, end):
     df = yf.download(ticker, start=start, end=end, progress=False)
     if df is None or df.empty:
         raise RuntimeError("No data returned for ticker/date range.")
-    # use Adj Close if available
     if 'Adj Close' in df.columns:
         df['Close'] = df['Adj Close']
     if 'Open' not in df.columns:
@@ -145,7 +163,7 @@ def run_backtest_engine(cfg):
         return {'error': str(e), 'traceback': traceback.format_exc()}, None, None
 
     df = df.copy().dropna()
-    # compute prior-day return vectorized (safe)
+    # vectorized prior-day returns safe
     df['prior_ret'] = df['Close'].pct_change().shift(1)
     df['Close_prev'] = df['Close'].shift(1)
 
@@ -160,7 +178,6 @@ def run_backtest_engine(cfg):
     else:
         df['ATR'] = np.nan
 
-    # initial state
     cash = float(cfg['initial_capital'])
     positions = []
     equity_points = []
@@ -178,7 +195,7 @@ def run_backtest_engine(cfg):
             monthly_realized[month_key] = 0.0
             month_start_equity[month_key] = cash + sum([p['shares']*row['Close'] for p in positions])
 
-        # 1) Check existing positions for stop/time/target
+        # check existing positions
         intr_low = row['Low'] if 'Low' in row.index else min(row['Open'], row['Close'])
         intr_high = row['High'] if 'High' in row.index else max(row['Open'], row['Close'])
         remaining = []
@@ -211,17 +228,17 @@ def run_backtest_engine(cfg):
                 remaining.append(pos)
         positions = remaining
 
-        # equity before new entries
+        # equity point
         equity_now = cash + sum([p['shares'] * row['Close'] for p in positions])
         equity_points.append({'date': idx, 'equity': equity_now})
 
         # monthly pause
         paused = monthly_realized[month_key] >= (month_start_equity[month_key] * cfg['monthly_target_pct'])
 
-        # emergency check: worst-case if stops triggered intraday
+        # emergency check
         worst_equity = cash + sum([(p['stop_price'] if p['stop_price'] < intr_low else row['Close']) * p['shares'] for p in positions])
         if worst_equity < allowed_min_equity:
-            # emergency close at close
+            # emergency close
             for pos in positions:
                 exit_price = row['Close']
                 pnl = (exit_price - pos['entry_price']) * pos['shares']
@@ -238,9 +255,9 @@ def run_backtest_engine(cfg):
             positions = []
             equity_now = cash
             if equity_now < allowed_min_equity:
-                break  # permanent shutdown
+                break
 
-        # entry logic (safe scalar checks)
+        # entry logic (scalar-safe)
         if (not paused) and len(positions) < cfg['max_open_positions'] and consecutive_losses < cfg['max_consecutive_losses']:
             signal = False; entry_price = None
             if cfg['entry_method'] == 'Momentum (prior-day)':
@@ -269,7 +286,6 @@ def run_backtest_engine(cfg):
                     signal = False
 
             if signal and entry_price is not None:
-                # sizing
                 if cfg['sizing_method'] == '% of Capital':
                     cap_for_trade = cfg['capital_alloc_pct'] * (cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*row['Close'] for p in positions])))
                     stop_price = entry_price * (1.0 - cfg['per_trade_stop'])
@@ -305,7 +321,6 @@ def run_backtest_engine(cfg):
     final_equity = float(equity_series.iloc[-1])
     total_return = (final_equity / cfg['initial_capital'] - 1.0) * 100.0
     max_dd = compute_max_drawdown(equity_series)
-    # cagr
     try:
         days = (pd.to_datetime(cfg['end']) - pd.to_datetime(cfg['start'])).days or 1
         years = days / 365.25
@@ -385,7 +400,7 @@ if run:
         st.text(result.get('error'))
         st.text(result.get('traceback'))
     else:
-        # Nice metrics row
+        # metrics row (white text guaranteed by CSS)
         st.markdown("### Summary")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Final equity", f"{result['final_equity']:.2f}")
@@ -394,14 +409,15 @@ if run:
         c4.metric("CAGR %", f"{result['cagr_pct']:.2f}%")
         st.write(f"Sharpe: {result['sharpe']:.3f}  Win%: {result['win_pct']:.2f}  Profit Factor: {result['profit_factor']}")
 
-        # Equity chart (dark)
+        # Equity chart (ensure labels white)
         if eq_df is not None and not eq_df.empty:
             fig, ax = plt.subplots(figsize=(10,4))
-            ax.plot(pd.to_datetime(eq_df['date']), eq_df['equity'], label='Equity', linewidth=2)
+            ax.plot(pd.to_datetime(eq_df['date']), eq_df['equity'], label='Equity', linewidth=2, color='#00E5FF')
             ax.axhline(cfg['initial_capital']*(1-cfg['max_overall_drawdown_pct']), color='red', linestyle='--', label='Allowed min equity')
-            ax.set_title(f"Equity Curve: {ticker_norm}")
-            ax.set_xlabel("Date"); ax.set_ylabel("Equity")
-            ax.legend()
+            ax.set_title(f"Equity Curve: {ticker_norm}", color='#FFFFFF')
+            ax.set_xlabel("Date", color='#FFFFFF'); ax.set_ylabel("Equity", color='#FFFFFF')
+            ax.tick_params(colors='#FFFFFF')
+            ax.legend(facecolor='#0b0b0b', edgecolor='#222', labelcolor='#FFFFFF')
             st.pyplot(fig)
 
         # Trades + downloads
@@ -422,6 +438,5 @@ if run:
         st.markdown("### Report JSON")
         st.json(result)
 
-    # preview info
-    preview.write(f"Ticker: **{ticker_norm}** | Data rows downloaded (if any) shown above.")
+    preview.write(f"Ticker: **{ticker_norm}** | {len(eq_df) if eq_df is not None else 0} rows downloaded (if any).")
 
