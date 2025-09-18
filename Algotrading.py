@@ -1,6 +1,6 @@
 # streamlit_app.py
-# Dark-mode backtest app with white labels & input text.
-# Full replacement — overwrite existing file and redeploy.
+# Full replacement: fixes ambiguous-series ValueError (safe scalar conversions),
+# keeps dark UI with white labels/inputs. Overwrite your app file with this.
 
 import streamlit as st
 import pandas as pd
@@ -10,26 +10,21 @@ import datetime as dt
 import matplotlib.pyplot as plt
 import io, traceback
 
-# optional ta import
+# optional TA lib
 try:
     import ta
 except Exception:
     ta = None
 
 # ---- Page config + strict dark CSS (white text for all inputs & labels) ----
-st.set_page_config(page_title="Backtest Studio (Dark, White Labels)", layout="wide", page_icon="📈")
-
+st.set_page_config(page_title="Backtest Studio (Fixed)", layout="wide", page_icon="📈")
 st.markdown(
     """
     <style>
-    /* Background and base text */
     html, body, .stApp, .block-container {
       background: #000000 !important;
       color: #FFFFFF !important;
     }
-
-    /* Ensure all labels are white */
-    /* Streamlit renders labels inside many wrapper classes; target them broadly */
     .stTextInput>div>label, 
     .stTextInput>label,
     .stNumberInput>div>label,
@@ -39,80 +34,40 @@ st.markdown(
     .stRadio>div>label,
     .stCheckbox>div>label,
     .stMultiselect>div>label,
-    label {
-      color: #FFFFFF !important;
-    }
-
-    /* Make input text white and background slightly lighter dark */
-    input, textarea, select {
-      color: #FFFFFF !important;
-      background: #0b0b0b !important;
-      border: 1px solid #222 !important;
-    }
-
-    /* Placeholder text color */
+    label { color: #FFFFFF !important; }
+    input, textarea, select { color: #FFFFFF !important; background: #0b0b0b !important; border:1px solid #222 !important; }
     ::placeholder { color: #BFC7CC !important; opacity: 1; }
-
-    /* Date input inner text */
-    .stDateInput input {
-      color: #FFFFFF !important;
-      background: #0b0b0b !important;
-    }
-
-    /* Headings and section titles */
     .section-title { font-size:18px; font-weight:600; color:#FFFFFF; margin-bottom:6px; }
-    /* Muted text */
     .muted { color: #BFC7CC; font-size:13px; }
-    /* Card background */
     .card { background:#0b0b0b; padding:12px; border-radius:8px; border:1px solid #222; color:#FFFFFF; }
-    /* Buttons */
-    .stButton>button, .stDownloadButton>button {
-      background-color:#1f2937 !important;
-      color:#FFFFFF !important;
-      border-radius:6px !important;
-    }
+    .stButton>button, .stDownloadButton>button { background-color:#1f2937 !important; color:#FFFFFF !important; border-radius:6px !important; }
     .stDownloadButton>button:hover { background-color:#272f3a !important; }
-    /* Streamlit metrics & small text */
     .stMetric > div { color: #FFFFFF !important; }
-    .stDataFrame table thead th {
-      color: #FFFFFF !important;
-      background: #0f1720 !important;
-    }
+    .stDataFrame table thead th { color: #FFFFFF !important; background: #0f1720 !important; }
     a { color: #7FDBFF !important; }
     pre, code { color: #E6E6E6 !important; background: #0b0b0b !important; }
-
-    /* Slider handle / value color */
     .stSlider span { color: #FFFFFF !important; }
-
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# use matplotlib dark background but ensure labels set to white explicitly when plotting
-plt.style.use('dark_background')
+plt.style.use('dark_background')  # matplotlib dark style
 
-st.title("📈 Backtest Studio — Dark Mode (white labels & inputs)")
+st.title("📈 Backtest Studio — Fixed & Dark")
 
-# ---- Sidebar (Run + quick env) ----
+# ---------------- Sidebar ----------------
 with st.sidebar:
     st.header("Run")
     run = st.button("🚀 Run Backtest")
     st.write("---")
     if st.button("Import & Env Test"):
-        mods = ["streamlit", "pandas", "numpy", "yfinance", "matplotlib"]
-        status = {}
-        for m in mods:
-            try:
-                __import__(m)
-                status[m] = "ok"
-            except Exception as e:
-                status[m] = f"ERROR: {e}"
-        st.json(status)
-    st.write("---")
-    st.markdown("<div class='muted'>Dark theme with enforced white labels & input text. Use daily data for stable runs.</div>", unsafe_allow_html=True)
+        modules = ["streamlit","pandas","numpy","yfinance","matplotlib"]
+        st.json({m: "ok" if __import__(m) else "missing" for m in modules})
 
-# ---- Main Inputs ----
+    st.markdown("<div class='muted'>Use daily data for stable results. This build fixes prior-day scalar issues.</div>", unsafe_allow_html=True)
+
+# ---------------- Main inputs ----------------
 col_left, col_right = st.columns([3,1])
 
 with col_left:
@@ -158,18 +113,19 @@ with col_left:
     taxes_pct = st.number_input("Taxes (%)", value=0.0)/100.0
 
 with col_right:
-    st.markdown('<div class="section-title">Quick Info</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Preview</div>', unsafe_allow_html=True)
     st.markdown('<div class="card">Set parameters on the left, then click <b>Run Backtest</b> in the sidebar.</div>', unsafe_allow_html=True)
     preview = st.empty()
 
-# ---- Helpers ----
-def normalize_ticker(t):
-    if not t: raise ValueError("Ticker required")
-    tu = t.strip().upper()
-    if tu in ("NIFTY","NIFTY50"): return "^NSEI"
-    if tu in ("SENSEX","BSE","BSESN"): return "^BSESN"
+# ---------------- Helpers ----------------
+def normalize_ticker(t: str) -> str:
+    if not t or not str(t).strip():
+        raise ValueError("Ticker required")
+    s = t.strip().upper()
+    if s in ("NIFTY","NIFTY50"): return "^NSEI"
+    if s in ("SENSEX","BSE","BSESN"): return "^BSESN"
     if "." in t or t.startswith("^"): return t.strip()
-    return tu + ".NS"
+    return s + ".NS"
 
 @st.cache_data(ttl=3600)
 def fetch_data(ticker, start, end):
@@ -183,13 +139,52 @@ def fetch_data(ticker, start, end):
     df.index = pd.to_datetime(df.index)
     return df
 
-def compute_max_drawdown(series):
+def compute_max_drawdown(series: pd.Series) -> float:
     if series.empty: return 0.0
     peak = series.cummax()
     dd = (peak - series) / peak
     return float(dd.max())
 
-# ---- Backtest engine (equity) ----
+def to_scalar(x):
+    """
+    Safely convert a value x to a single float scalar.
+    - If x is pandas Series/Index or numpy array, take last element if exists.
+    - If x is scalar numeric, return float(x)
+    - If x is None or NaN, return np.nan
+    """
+    if x is None:
+        return np.nan
+    if isinstance(x, (pd.Series, pd.Index)):
+        if len(x) == 0:
+            return np.nan
+        # take last element
+        try:
+            val = x.iloc[-1]
+        except Exception:
+            val = x.values[-1]
+        try:
+            return float(val)
+        except Exception:
+            return np.nan
+    if isinstance(x, np.ndarray):
+        if x.size == 0:
+            return np.nan
+        try:
+            return float(x.ravel()[-1])
+        except Exception:
+            return np.nan
+    # scalar
+    try:
+        if pd.isna(x):
+            return np.nan
+    except Exception:
+        pass
+    try:
+        return float(x)
+    except Exception:
+        return np.nan
+
+# ---------------- Backtest engine ----------------
 def run_backtest_engine(cfg):
     try:
         df = fetch_data(cfg['ticker_norm'], cfg['start'], cfg['end'])
@@ -197,14 +192,14 @@ def run_backtest_engine(cfg):
         return {'error': str(e), 'traceback': traceback.format_exc()}, None, None
 
     df = df.copy().dropna()
-    # vectorized prior-day returns safe
+    # compute prior-day return vectorized and safely
     df['prior_ret'] = df['Close'].pct_change().shift(1)
     df['Close_prev'] = df['Close'].shift(1)
 
-    # optional indicators
+    # indicators
     if cfg.get('ma_short') and cfg.get('ma_long'):
         df['MA_short'] = df['Close'].rolling(int(cfg['ma_short'])).mean()
-        df['MA_long']  = df['Close'].rolling(int(cfg['ma_long'])).mean()
+        df['MA_long'] = df['Close'].rolling(int(cfg['ma_long'])).mean()
     if cfg.get('rsi_period') and ta is not None:
         df['RSI'] = ta.momentum.rsi(df['Close'], window=int(cfg['rsi_period']))
     if ta is not None and set(['High','Low']).issubset(df.columns):
@@ -212,6 +207,7 @@ def run_backtest_engine(cfg):
     else:
         df['ATR'] = np.nan
 
+    # state
     cash = float(cfg['initial_capital'])
     positions = []
     equity_points = []
@@ -221,6 +217,7 @@ def run_backtest_engine(cfg):
     consecutive_losses = 0
     allowed_min_equity = cfg['initial_capital'] * (1.0 - cfg['max_overall_drawdown_pct'])
 
+    # iterate days
     for idx, row in df.iterrows():
         today = idx.date()
         month_key = str(idx.to_period('M'))
@@ -229,12 +226,13 @@ def run_backtest_engine(cfg):
             monthly_realized[month_key] = 0.0
             month_start_equity[month_key] = cash + sum([p['shares']*row['Close'] for p in positions])
 
-        # check existing positions
+        # existing positions: check stops/targets/time exits
         intr_low = row['Low'] if 'Low' in row.index else min(row['Open'], row['Close'])
         intr_high = row['High'] if 'High' in row.index else max(row['Open'], row['Close'])
         remaining = []
         for pos in positions:
-            exit_price = None; reason = None
+            exit_price = None
+            reason = None
             if intr_low <= pos['stop_price']:
                 exit_price = pos['stop_price']; reason = 'stop'
             elif pos.get('target_price') is not None and intr_high >= pos['target_price']:
@@ -256,27 +254,29 @@ def run_backtest_engine(cfg):
                                'pnl': pnl_net,
                                'reason': reason})
                 monthly_realized[month_key] += pnl_net
-                if pnl_net < 0: consecutive_losses += 1
-                else: consecutive_losses = 0
+                if pnl_net < 0:
+                    consecutive_losses += 1
+                else:
+                    consecutive_losses = 0
             else:
                 remaining.append(pos)
         positions = remaining
 
-        # equity point
+        # equity snapshot
         equity_now = cash + sum([p['shares'] * row['Close'] for p in positions])
         equity_points.append({'date': idx, 'equity': equity_now})
 
         # monthly pause
         paused = monthly_realized[month_key] >= (month_start_equity[month_key] * cfg['monthly_target_pct'])
 
-        # emergency check
+        # emergency check: worst-case if stops triggered intraday
         worst_equity = cash + sum([(p['stop_price'] if p['stop_price'] < intr_low else row['Close']) * p['shares'] for p in positions])
         if worst_equity < allowed_min_equity:
-            # emergency close
+            # emergency close all at close
             for pos in positions:
                 exit_price = row['Close']
                 pnl = (exit_price - pos['entry_price']) * pos['shares']
-                cost_exit = cfg['brokerage'] + abs(exit_price*pos['shares'])*(cfg['slippage_pct']+cfg['exchange_fee_pct']+cfg['taxes_pct'])
+                cost_exit = cfg['brokerage'] + abs(exit_price*pos['shares'])*(cfg['slippage_pct'] + cfg['exchange_fee_pct'] + cfg['taxes_pct'])
                 pnl_net = pnl - cost_exit
                 cash += pos['shares'] * exit_price - cost_exit
                 trades.append({'entry_date': pos['entry_date'].isoformat(),
@@ -289,29 +289,37 @@ def run_backtest_engine(cfg):
             positions = []
             equity_now = cash
             if equity_now < allowed_min_equity:
-                break
+                break  # permanent shutdown
 
-        # entry logic (scalar-safe)
+        # ENTRY logic with safe scalar conversions
         if (not paused) and len(positions) < cfg['max_open_positions'] and consecutive_losses < cfg['max_consecutive_losses']:
-            signal = False; entry_price = None
+            signal = False
+            entry_price = None
+
             if cfg['entry_method'] == 'Momentum (prior-day)':
-                pr = row.get('prior_ret', np.nan)
-                if pd.notna(pr) and float(pr) > float(cfg.get('prior_day_thr', 0.0)):
+                pr_raw = row.get('prior_ret', np.nan)
+                pr = to_scalar(pr_raw)
+                if not np.isnan(pr) and pr > float(cfg.get('prior_day_thr', 0.0)):
                     signal = True; entry_price = row['Open']
+
             elif cfg['entry_method'] == 'MA crossover':
-                if pd.notna(row.get('MA_short', np.nan)) and pd.notna(row.get('MA_long', np.nan)):
-                    if float(row['MA_short']) > float(row['MA_long']):
-                        signal = True; entry_price = row['Open']
-            elif cfg['entry_method'] == 'RSI':
-                rsi = row.get('RSI', np.nan)
-                if pd.notna(rsi) and float(rsi) < float(cfg.get('rsi_enter_thr', 0)):
+                ms = to_scalar(row.get('MA_short', np.nan))
+                ml = to_scalar(row.get('MA_long', np.nan))
+                if (not np.isnan(ms)) and (not np.isnan(ml)) and (ms > ml):
                     signal = True; entry_price = row['Open']
+
+            elif cfg['entry_method'] == 'RSI':
+                rsi_raw = row.get('RSI', np.nan)
+                rsi_val = to_scalar(rsi_raw)
+                if not np.isnan(rsi_val) and rsi_val < float(cfg.get('rsi_enter_thr', 0)):
+                    signal = True; entry_price = row['Open']
+
             elif cfg['entry_method'] == 'Custom (simple)':
                 try:
                     local = df.loc[:idx].copy()
-                    cond = eval(cfg.get('custom_rule',''), {"df": local, "np": np, "pd": pd})
+                    cond = eval(cfg.get('custom_rule', ''), {"df": local, "np": np, "pd": pd})
                     if isinstance(cond, pd.Series):
-                        cond_val = bool(cond.iloc[-1])
+                        cond_val = bool(to_scalar(cond))
                     else:
                         cond_val = bool(cond)
                     if cond_val:
@@ -320,31 +328,33 @@ def run_backtest_engine(cfg):
                     signal = False
 
             if signal and entry_price is not None:
+                # sizing
                 if cfg['sizing_method'] == '% of Capital':
                     cap_for_trade = cfg['capital_alloc_pct'] * (cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*row['Close'] for p in positions])))
                     stop_price = entry_price * (1.0 - cfg['per_trade_stop'])
                     shares = int(cap_for_trade // entry_price)
                 elif cfg['sizing_method'] == 'Fixed shares':
-                    shares = int(cfg['fixed_shares']); stop_price = entry_price*(1.0 - cfg['per_trade_stop'])
+                    shares = int(cfg['fixed_shares'])
+                    stop_price = entry_price * (1.0 - cfg['per_trade_stop'])
                 elif cfg['sizing_method'] == 'Volatility (ATR)':
-                    atr = row.get('ATR', np.nan)
-                    stop_price = entry_price - max(atr if not pd.isna(atr) else 0.0, entry_price*cfg['per_trade_stop'])
-                    shares = int((cfg['capital_alloc_pct']*(cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*row['Close'] for p in positions])))) // entry_price)
+                    atr = to_scalar(row.get('ATR', np.nan))
+                    stop_price = entry_price - max(atr if not np.isnan(atr) else 0.0, entry_price * cfg['per_trade_stop'])
+                    shares = int((cfg['capital_alloc_pct'] * (cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*row['Close'] for p in positions])))) // entry_price)
                 else:
-                    shares = 0; stop_price = entry_price*(1.0 - cfg['per_trade_stop'])
+                    shares = 0; stop_price = entry_price * (1.0 - cfg['per_trade_stop'])
 
                 if shares > 0 and shares * entry_price <= cash:
                     hypothetical_cash = cash - (shares * entry_price)
-                    worst_if_stop = hypothetical_cash + (shares * stop_price) + sum([p['shares']*row['Close'] for p in positions])
+                    worst_if_stop = hypothetical_cash + (shares * stop_price) + sum([p['shares'] * row['Close'] for p in positions])
                     if worst_if_stop < allowed_min_equity:
                         trades.append({'entry_date': today.isoformat(), 'exit_date': None, 'entry_price': entry_price, 'exit_price': None, 'shares': 0, 'pnl': 0.0, 'reason': 'entry_skipped_would_breach_overall_drawdown'})
                     else:
-                        cost_entry = cfg['brokerage'] + abs(entry_price*shares)*(cfg['slippage_pct']+cfg['exchange_fee_pct']+cfg['taxes_pct'])
+                        cost_entry = cfg['brokerage'] + abs(entry_price * shares) * (cfg['slippage_pct'] + cfg['exchange_fee_pct'] + cfg['taxes_pct'])
                         cash -= (shares * entry_price) + cost_entry
-                        positions.append({'entry_date': today, 'entry_price': entry_price, 'shares': shares, 'stop_price': stop_price, 'target_price': entry_price*(1+cfg['profit_target'])})
+                        positions.append({'entry_date': today, 'entry_price': entry_price, 'shares': shares, 'stop_price': stop_price, 'target_price': entry_price * (1 + cfg['profit_target'])})
                         trades.append({'entry_date': today.isoformat(), 'exit_date': None, 'entry_price': entry_price, 'exit_price': None, 'shares': shares, 'pnl': None, 'reason': 'entry'})
 
-    # finalize
+    # finalize outputs
     eq_df = pd.DataFrame(equity_points)
     if not eq_df.empty:
         eq_df = eq_df.set_index('date')
@@ -358,19 +368,19 @@ def run_backtest_engine(cfg):
     try:
         days = (pd.to_datetime(cfg['end']) - pd.to_datetime(cfg['start'])).days or 1
         years = days / 365.25
-        cagr_val = ((equity_series.iloc[-1] / equity_series.iloc[0])**(1/years) - 1.0) * 100.0 if years>0 else 0.0
+        cagr_val = ((equity_series.iloc[-1] / equity_series.iloc[0]) ** (1 / years) - 1.0) * 100.0 if years > 0 else 0.0
     except Exception:
         cagr_val = 0.0
     daily_ret = equity_series.pct_change().dropna()
-    sharpe = (daily_ret.mean() / daily_ret.std(ddof=1) * np.sqrt(252)) if not daily_ret.empty and daily_ret.std(ddof=1)!=0 else 0.0
+    sharpe = (daily_ret.mean() / daily_ret.std(ddof=1) * np.sqrt(252)) if not daily_ret.empty and daily_ret.std(ddof=1) != 0 else 0.0
 
     trades_df = pd.DataFrame(trades)
-    wins = trades_df[trades_df['pnl']>0] if not trades_df.empty else pd.DataFrame()
-    losses = trades_df[trades_df['pnl']<0] if not trades_df.empty else pd.DataFrame()
-    win_pct = (len(wins)/len(trades_df)*100.0) if len(trades_df)>0 else 0.0
+    wins = trades_df[trades_df['pnl'] > 0] if not trades_df.empty else pd.DataFrame()
+    losses = trades_df[trades_df['pnl'] < 0] if not trades_df.empty else pd.DataFrame()
+    win_pct = (len(wins) / len(trades_df) * 100.0) if len(trades_df) > 0 else 0.0
     avg_win = wins['pnl'].mean() if not wins.empty else 0.0
     avg_loss = losses['pnl'].mean() if not losses.empty else 0.0
-    profit_factor = (wins['pnl'].sum()/abs(losses['pnl'].sum())) if (not losses.empty and losses['pnl'].sum()!=0) else np.nan
+    profit_factor = (wins['pnl'].sum() / abs(losses['pnl'].sum())) if (not losses.empty and losses['pnl'].sum() != 0) else np.nan
 
     report = {
         'final_equity': final_equity,
@@ -387,7 +397,7 @@ def run_backtest_engine(cfg):
     }
     return report, report['equity_df'], report['trades_df']
 
-# ---- Run when sidebar Run pressed ----
+# ---------------- Run handler ----------------
 if run:
     try:
         ticker_norm = normalize_ticker(raw_ticker)
@@ -434,7 +444,6 @@ if run:
         st.text(result.get('error'))
         st.text(result.get('traceback'))
     else:
-        # metrics row (white text enforced by CSS)
         st.markdown("### Summary")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Final equity", f"{result['final_equity']:.2f}")
@@ -443,7 +452,6 @@ if run:
         c4.metric("CAGR %", f"{result['cagr_pct']:.2f}%")
         st.write(f"Sharpe: {result['sharpe']:.3f}  Win%: {result['win_pct']:.2f}  Profit Factor: {result['profit_factor']}")
 
-        # Equity chart (dark, labels forced white)
         if eq_df is not None and not eq_df.empty:
             fig, ax = plt.subplots(figsize=(10,4))
             ax.plot(pd.to_datetime(eq_df['date']), eq_df['equity'], label='Equity', linewidth=2, color='#00E5FF')
@@ -454,7 +462,6 @@ if run:
             ax.legend(facecolor='#0b0b0b', edgecolor='#222', labelcolor='#FFFFFF')
             st.pyplot(fig)
 
-        # Trades + downloads
         st.markdown("### Trades")
         if trades_df is None or trades_df.empty:
             st.write("No trades executed.")
