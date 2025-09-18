@@ -1,6 +1,7 @@
 # streamlit_app.py
-# Full replacement: fixes ambiguous-series ValueError (safe scalar conversions),
-# keeps dark UI with white labels/inputs. Overwrite your app file with this.
+# Full replacement: fixes ambiguous-series ValueError by forcing scalar conversion before boolean checks.
+# Dark UI with white labels preserved.
+# Overwrite your existing app file with this and redeploy.
 
 import streamlit as st
 import pandas as pd
@@ -17,7 +18,7 @@ except Exception:
     ta = None
 
 # ---- Page config + strict dark CSS (white text for all inputs & labels) ----
-st.set_page_config(page_title="Backtest Studio (Fixed)", layout="wide", page_icon="📈")
+st.set_page_config(page_title="Backtest Studio (Fixed Scalars)", layout="wide", page_icon="📈")
 st.markdown(
     """
     <style>
@@ -52,9 +53,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-plt.style.use('dark_background')  # matplotlib dark style
+plt.style.use('dark_background')  # ensure matplotlib dark style
 
-st.title("📈 Backtest Studio — Fixed & Dark")
+st.title("📈 Backtest Studio — Fixed (safe scalar checks)")
 
 # ---------------- Sidebar ----------------
 with st.sidebar:
@@ -63,11 +64,17 @@ with st.sidebar:
     st.write("---")
     if st.button("Import & Env Test"):
         modules = ["streamlit","pandas","numpy","yfinance","matplotlib"]
-        st.json({m: "ok" if __import__(m) else "missing" for m in modules})
+        env = {}
+        for m in modules:
+            try:
+                __import__(m)
+                env[m] = "ok"
+            except Exception as e:
+                env[m] = f"error: {e}"
+        st.json(env)
+    st.markdown("<div class='muted'>This build forces scalar conversion before any boolean test to avoid 'Series is ambiguous' errors.</div>", unsafe_allow_html=True)
 
-    st.markdown("<div class='muted'>Use daily data for stable results. This build fixes prior-day scalar issues.</div>", unsafe_allow_html=True)
-
-# ---------------- Main inputs ----------------
+# ---------------- Main Inputs ----------------
 col_left, col_right = st.columns([3,1])
 
 with col_left:
@@ -147,23 +154,20 @@ def compute_max_drawdown(series: pd.Series) -> float:
 
 def to_scalar(x):
     """
-    Safely convert a value x to a single float scalar.
-    - If x is pandas Series/Index or numpy array, take last element if exists.
-    - If x is scalar numeric, return float(x)
-    - If x is None or NaN, return np.nan
+    Convert x (scalar, pd.Series, np.ndarray, pd.Index) to a single float scalar.
+    Returns np.nan for None/empty/invalid.
     """
     if x is None:
         return np.nan
     if isinstance(x, (pd.Series, pd.Index)):
         if len(x) == 0:
             return np.nan
-        # take last element
         try:
-            val = x.iloc[-1]
+            v = x.iloc[-1]
         except Exception:
-            val = x.values[-1]
+            v = x.values[-1]
         try:
-            return float(val)
+            return float(v)
         except Exception:
             return np.nan
     if isinstance(x, np.ndarray):
@@ -173,7 +177,6 @@ def to_scalar(x):
             return float(x.ravel()[-1])
         except Exception:
             return np.nan
-    # scalar
     try:
         if pd.isna(x):
             return np.nan
@@ -192,11 +195,9 @@ def run_backtest_engine(cfg):
         return {'error': str(e), 'traceback': traceback.format_exc()}, None, None
 
     df = df.copy().dropna()
-    # compute prior-day return vectorized and safely
     df['prior_ret'] = df['Close'].pct_change().shift(1)
     df['Close_prev'] = df['Close'].shift(1)
 
-    # indicators
     if cfg.get('ma_short') and cfg.get('ma_long'):
         df['MA_short'] = df['Close'].rolling(int(cfg['ma_short'])).mean()
         df['MA_long'] = df['Close'].rolling(int(cfg['ma_long'])).mean()
@@ -207,7 +208,6 @@ def run_backtest_engine(cfg):
     else:
         df['ATR'] = np.nan
 
-    # state
     cash = float(cfg['initial_capital'])
     positions = []
     equity_points = []
@@ -217,7 +217,6 @@ def run_backtest_engine(cfg):
     consecutive_losses = 0
     allowed_min_equity = cfg['initial_capital'] * (1.0 - cfg['max_overall_drawdown_pct'])
 
-    # iterate days
     for idx, row in df.iterrows():
         today = idx.date()
         month_key = str(idx.to_period('M'))
@@ -226,13 +225,12 @@ def run_backtest_engine(cfg):
             monthly_realized[month_key] = 0.0
             month_start_equity[month_key] = cash + sum([p['shares']*row['Close'] for p in positions])
 
-        # existing positions: check stops/targets/time exits
+        # existing positions
         intr_low = row['Low'] if 'Low' in row.index else min(row['Open'], row['Close'])
         intr_high = row['High'] if 'High' in row.index else max(row['Open'], row['Close'])
         remaining = []
         for pos in positions:
-            exit_price = None
-            reason = None
+            exit_price = None; reason = None
             if intr_low <= pos['stop_price']:
                 exit_price = pos['stop_price']; reason = 'stop'
             elif pos.get('target_price') is not None and intr_high >= pos['target_price']:
@@ -254,10 +252,8 @@ def run_backtest_engine(cfg):
                                'pnl': pnl_net,
                                'reason': reason})
                 monthly_realized[month_key] += pnl_net
-                if pnl_net < 0:
-                    consecutive_losses += 1
-                else:
-                    consecutive_losses = 0
+                if pnl_net < 0: consecutive_losses += 1
+                else: consecutive_losses = 0
             else:
                 remaining.append(pos)
         positions = remaining
@@ -269,10 +265,9 @@ def run_backtest_engine(cfg):
         # monthly pause
         paused = monthly_realized[month_key] >= (month_start_equity[month_key] * cfg['monthly_target_pct'])
 
-        # emergency check: worst-case if stops triggered intraday
+        # emergency check
         worst_equity = cash + sum([(p['stop_price'] if p['stop_price'] < intr_low else row['Close']) * p['shares'] for p in positions])
         if worst_equity < allowed_min_equity:
-            # emergency close all at close
             for pos in positions:
                 exit_price = row['Close']
                 pnl = (exit_price - pos['entry_price']) * pos['shares']
@@ -289,70 +284,74 @@ def run_backtest_engine(cfg):
             positions = []
             equity_now = cash
             if equity_now < allowed_min_equity:
-                break  # permanent shutdown
+                break
 
-        # ENTRY logic with safe scalar conversions
+        # ENTRY logic: convert to scalars before comparisons
         if (not paused) and len(positions) < cfg['max_open_positions'] and consecutive_losses < cfg['max_consecutive_losses']:
-            signal = False
-            entry_price = None
+            signal = False; entry_price = None
 
             if cfg['entry_method'] == 'Momentum (prior-day)':
                 pr_raw = row.get('prior_ret', np.nan)
                 pr = to_scalar(pr_raw)
                 if not np.isnan(pr) and pr > float(cfg.get('prior_day_thr', 0.0)):
-                    signal = True; entry_price = row['Open']
+                    signal = True; entry_price = to_scalar(row.get('Open', np.nan))
 
             elif cfg['entry_method'] == 'MA crossover':
-                ms = to_scalar(row.get('MA_short', np.nan))
-                ml = to_scalar(row.get('MA_long', np.nan))
+                ms = to_scalar(row.get('MA_short', np.nan)); ml = to_scalar(row.get('MA_long', np.nan))
                 if (not np.isnan(ms)) and (not np.isnan(ml)) and (ms > ml):
-                    signal = True; entry_price = row['Open']
+                    signal = True; entry_price = to_scalar(row.get('Open', np.nan))
 
             elif cfg['entry_method'] == 'RSI':
-                rsi_raw = row.get('RSI', np.nan)
-                rsi_val = to_scalar(rsi_raw)
+                rsi_val = to_scalar(row.get('RSI', np.nan))
                 if not np.isnan(rsi_val) and rsi_val < float(cfg.get('rsi_enter_thr', 0)):
-                    signal = True; entry_price = row['Open']
+                    signal = True; entry_price = to_scalar(row.get('Open', np.nan))
 
             elif cfg['entry_method'] == 'Custom (simple)':
                 try:
                     local = df.loc[:idx].copy()
-                    cond = eval(cfg.get('custom_rule', ''), {"df": local, "np": np, "pd": pd})
-                    if isinstance(cond, pd.Series):
+                    cond = eval(cfg.get('custom_rule',''), {"df": local, "np": np, "pd": pd})
+                    if isinstance(cond, (pd.Series, pd.Index, np.ndarray)):
                         cond_val = bool(to_scalar(cond))
                     else:
                         cond_val = bool(cond)
                     if cond_val:
-                        signal = True; entry_price = row['Open']
+                        signal = True; entry_price = to_scalar(row.get('Open', np.nan))
                 except Exception:
                     signal = False
 
-            if signal and entry_price is not None:
-                # sizing
+            # sizing (all on scalars)
+            if signal and entry_price is not None and not np.isnan(entry_price):
                 if cfg['sizing_method'] == '% of Capital':
                     cap_for_trade = cfg['capital_alloc_pct'] * (cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*row['Close'] for p in positions])))
                     stop_price = entry_price * (1.0 - cfg['per_trade_stop'])
-                    shares = int(cap_for_trade // entry_price)
+                    shares_calc = cap_for_trade // entry_price if entry_price>0 else 0
+                    shares = int(to_scalar(shares_calc))
                 elif cfg['sizing_method'] == 'Fixed shares':
-                    shares = int(cfg['fixed_shares'])
-                    stop_price = entry_price * (1.0 - cfg['per_trade_stop'])
+                    shares = int(to_scalar(cfg['fixed_shares'])); stop_price = entry_price * (1.0 - cfg['per_trade_stop'])
                 elif cfg['sizing_method'] == 'Volatility (ATR)':
-                    atr = to_scalar(row.get('ATR', np.nan))
-                    stop_price = entry_price - max(atr if not np.isnan(atr) else 0.0, entry_price * cfg['per_trade_stop'])
-                    shares = int((cfg['capital_alloc_pct'] * (cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*row['Close'] for p in positions])))) // entry_price)
+                    atr_val = to_scalar(row.get('ATR', np.nan))
+                    stop_price = entry_price - max(atr_val if not np.isnan(atr_val) else 0.0, entry_price*cfg['per_trade_stop'])
+                    cap_for_trade = cfg['capital_alloc_pct'] * (cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*row['Close'] for p in positions])))
+                    shares_calc = cap_for_trade // entry_price if entry_price>0 else 0
+                    shares = int(to_scalar(shares_calc))
                 else:
                     shares = 0; stop_price = entry_price * (1.0 - cfg['per_trade_stop'])
 
-                if shares > 0 and shares * entry_price <= cash:
-                    hypothetical_cash = cash - (shares * entry_price)
-                    worst_if_stop = hypothetical_cash + (shares * stop_price) + sum([p['shares'] * row['Close'] for p in positions])
+                # ensure shares and numeric values are scalars before boolean tests
+                shares_s = int(to_scalar(shares)) if not np.isnan(to_scalar(shares)) else 0
+                entry_price_s = to_scalar(entry_price)
+                stop_price_s = to_scalar(stop_price)
+
+                if shares_s > 0 and (entry_price_s * shares_s) <= float(cash):
+                    hypothetical_cash = float(cash) - (shares_s * entry_price_s)
+                    worst_if_stop = hypothetical_cash + (shares_s * stop_price_s) + sum([p['shares'] * row['Close'] for p in positions])
                     if worst_if_stop < allowed_min_equity:
-                        trades.append({'entry_date': today.isoformat(), 'exit_date': None, 'entry_price': entry_price, 'exit_price': None, 'shares': 0, 'pnl': 0.0, 'reason': 'entry_skipped_would_breach_overall_drawdown'})
+                        trades.append({'entry_date': today.isoformat(), 'exit_date': None, 'entry_price': entry_price_s, 'exit_price': None, 'shares': 0, 'pnl': 0.0, 'reason': 'entry_skipped_would_breach_overall_drawdown'})
                     else:
-                        cost_entry = cfg['brokerage'] + abs(entry_price * shares) * (cfg['slippage_pct'] + cfg['exchange_fee_pct'] + cfg['taxes_pct'])
-                        cash -= (shares * entry_price) + cost_entry
-                        positions.append({'entry_date': today, 'entry_price': entry_price, 'shares': shares, 'stop_price': stop_price, 'target_price': entry_price * (1 + cfg['profit_target'])})
-                        trades.append({'entry_date': today.isoformat(), 'exit_date': None, 'entry_price': entry_price, 'exit_price': None, 'shares': shares, 'pnl': None, 'reason': 'entry'})
+                        cost_entry = cfg['brokerage'] + abs(entry_price_s * shares_s) * (cfg['slippage_pct'] + cfg['exchange_fee_pct'] + cfg['taxes_pct'])
+                        cash -= (shares_s * entry_price_s) + cost_entry
+                        positions.append({'entry_date': today, 'entry_price': entry_price_s, 'shares': shares_s, 'stop_price': stop_price_s, 'target_price': entry_price_s * (1 + cfg['profit_target'])})
+                        trades.append({'entry_date': today.isoformat(), 'exit_date': None, 'entry_price': entry_price_s, 'exit_price': None, 'shares': shares_s, 'pnl': None, 'reason': 'entry'})
 
     # finalize outputs
     eq_df = pd.DataFrame(equity_points)
