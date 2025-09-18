@@ -1,6 +1,6 @@
 # streamlit_app.py
-# Full replacement — fixes "unhashable type: 'Series'" and other robustness issues.
-# Drop this into your repo, overwrite the old file, redeploy.
+# Full replacement — fixes ambiguous Series truth-value and other robustness issues.
+# Drop this into your repo, overwrite the old file, and redeploy.
 
 import streamlit as st
 import traceback
@@ -100,7 +100,7 @@ def compute_max_drawdown(equity_series: pd.Series) -> float:
     dd = (peak - equity_series) / peak
     return float(dd.max())
 
-# Core backtest (defensive, keys are strings)
+# Core backtest (defensive, robust scalar handling)
 def run_backtest_core(df: pd.DataFrame,
                       initial_capital: float,
                       pos_stop_pct: float,
@@ -109,7 +109,7 @@ def run_backtest_core(df: pd.DataFrame,
                       max_hold_days: int,
                       entry_threshold: float):
     try:
-        cash = initial_capital
+        cash = float(initial_capital)
         positions = []  # list of dicts: entry_date (date), entry_price (float), shares (int), stop_price (float)
         equity_points = []
         trades = []
@@ -118,25 +118,21 @@ def run_backtest_core(df: pd.DataFrame,
         shutdown_info = {"happened": False, "date": None, "reason": None}
 
         df2 = df.copy()
-        # we'll compute prior_ret on Close
         df2["prior_ret"] = df2["Close"].pct_change().shift(1)
 
         for idx, row in df2.iterrows():
-            # idx is a Timestamp
             today_open = float(row["Open"])
             today_close = float(row["Close"])
             today_date = idx.date()
-            # **IMPORTANT**: use string month key to avoid unhashable/Series issues
-            today_month_str = str(idx.to_period("M"))  # e.g. '2025-09'
+            today_month_str = str(idx.to_period("M"))  # safe dict key
 
-            # init month bookkeeping when first encountered
             if today_month_str not in monthly_realized:
                 monthly_realized[today_month_str] = 0.0
                 month_start_equity[today_month_str] = cash + sum([p["shares"] * today_close for p in positions])
 
             realized_today = 0.0
 
-            # check existing positions for stop or time exit
+            # check existing positions for stop/time exit
             intraday_low = min(today_open, today_close)
             remaining_positions = []
             for pos in positions:
@@ -170,32 +166,38 @@ def run_backtest_core(df: pd.DataFrame,
 
             # equity before new entries
             equity = cash + sum([p["shares"] * today_close for p in positions])
-            # compute running drawdown using previous equity points plus current equity
             prev_eqs = [pt["equity"] for pt in equity_points]
-            eq_hist = pd.Series(prev_eqs + [equity]) if prev_eqs else pd.Series([equity])
-            running_dd = compute_max_drawdown(eq_hist)
+            eq_hist_series = pd.Series(prev_eqs + [equity]) if prev_eqs else pd.Series([equity])
+            running_dd = compute_max_drawdown(eq_hist_series)
 
             # monthly pause
             paused_for_month = monthly_realized[today_month_str] >= (month_start_equity[today_month_str] * monthly_target_pct)
 
-            # entry signal: prior day return > threshold
+            # entry signal: take prior_ret as scalar safely
+            pr_raw = row.get("prior_ret", None)
+            # If pr_raw is a Series/ndarray, try to extract scalar; else keep as-is
+            if isinstance(pr_raw, (pd.Series, np.ndarray)):
+                try:
+                    pr = float(pr_raw.item())
+                except Exception:
+                    pr = np.nan
+            else:
+                pr = float(pr_raw) if pd.notna(pr_raw) else np.nan
+
             signal = False
-            pr = row["prior_ret"]
-            if (not paused_for_month) and (pd.notna(pr) and pr > entry_threshold):
+            if (not paused_for_month) and (pd.notna(pr) and pr > float(entry_threshold)):
                 signal = True
 
             if signal:
-                # sizing: risk_amount = equity * pos_stop_pct
+                # sizing
                 risk_amount = equity * pos_stop_pct
                 stop_price = today_open * (1.0 - pos_stop_pct)
                 stop_distance = max(1e-6, today_open - stop_price)
                 shares = int(risk_amount // stop_distance)
                 if shares > 0 and shares * today_open <= cash:
-                    # worst-case if stop triggers immediately
                     worst_equity_if_stop = cash - (shares * today_open) + (shares * stop_price) + sum([p["shares"] * today_close for p in positions])
                     allowed_min_equity = initial_capital * (1.0 - overall_dd_pct)
                     if worst_equity_if_stop < allowed_min_equity:
-                        # skip entry to avoid breaching overall drawdown
                         trades.append({
                             "entry_date": today_date.isoformat(),
                             "exit_date": None,
@@ -214,7 +216,7 @@ def run_backtest_core(df: pd.DataFrame,
                             "stop_price": float(stop_price)
                         })
 
-            # after possibly entering, compute worst-case intraday across all positions
+            # check worst-case intraday across positions
             intraday_low_for_check = intraday_low
             worst_equity = cash + sum([
                 (pos["stop_price"] if pos["stop_price"] < intraday_low_for_check else today_close) * pos["shares"]
@@ -222,7 +224,7 @@ def run_backtest_core(df: pd.DataFrame,
             ])
             allowed_min_equity = initial_capital * (1.0 - overall_dd_pct)
             if worst_equity < allowed_min_equity:
-                # emergency close all at close
+                # emergency close
                 for pos in positions:
                     exit_price = today_close
                     pnl = (exit_price - pos["entry_price"]) * pos["shares"]
@@ -238,7 +240,6 @@ def run_backtest_core(df: pd.DataFrame,
                     })
                 positions = []
                 equity = cash
-                # if still below allowed min, shutdown permanently
                 if equity < allowed_min_equity:
                     shutdown_info["happened"] = True
                     shutdown_info["date"] = today_date.isoformat()
