@@ -1,5 +1,5 @@
 # streamlit_app.py
-# Dark-mode backtest app with enforced white fonts on black background.
+# Dark-mode backtest app with white labels & input text.
 # Full replacement — overwrite existing file and redeploy.
 
 import streamlit as st
@@ -16,8 +16,9 @@ try:
 except Exception:
     ta = None
 
-# ---- Page config + strict dark CSS (white text) ----
-st.set_page_config(page_title="Backtest Studio (Dark, White Text)", layout="wide", page_icon="📈")
+# ---- Page config + strict dark CSS (white text for all inputs & labels) ----
+st.set_page_config(page_title="Backtest Studio (Dark, White Labels)", layout="wide", page_icon="📈")
+
 st.markdown(
     """
     <style>
@@ -26,6 +27,38 @@ st.markdown(
       background: #000000 !important;
       color: #FFFFFF !important;
     }
+
+    /* Ensure all labels are white */
+    /* Streamlit renders labels inside many wrapper classes; target them broadly */
+    .stTextInput>div>label, 
+    .stTextInput>label,
+    .stNumberInput>div>label,
+    .stDateInput>div>label,
+    .stSelectbox>div>label,
+    .stSlider>div>label,
+    .stRadio>div>label,
+    .stCheckbox>div>label,
+    .stMultiselect>div>label,
+    label {
+      color: #FFFFFF !important;
+    }
+
+    /* Make input text white and background slightly lighter dark */
+    input, textarea, select {
+      color: #FFFFFF !important;
+      background: #0b0b0b !important;
+      border: 1px solid #222 !important;
+    }
+
+    /* Placeholder text color */
+    ::placeholder { color: #BFC7CC !important; opacity: 1; }
+
+    /* Date input inner text */
+    .stDateInput input {
+      color: #FFFFFF !important;
+      background: #0b0b0b !important;
+    }
+
     /* Headings and section titles */
     .section-title { font-size:18px; font-weight:600; color:#FFFFFF; margin-bottom:6px; }
     /* Muted text */
@@ -38,27 +71,28 @@ st.markdown(
       color:#FFFFFF !important;
       border-radius:6px !important;
     }
+    .stDownloadButton>button:hover { background-color:#272f3a !important; }
     /* Streamlit metrics & small text */
     .stMetric > div { color: #FFFFFF !important; }
-    .stDownloadButton>button:hover { background-color:#272f3a !important; }
-    /* Dataframe/table header color */
     .stDataFrame table thead th {
       color: #FFFFFF !important;
       background: #0f1720 !important;
     }
-    /* Make links readable */
     a { color: #7FDBFF !important; }
-    /* Ensure code blocks are readable */
     pre, code { color: #E6E6E6 !important; background: #0b0b0b !important; }
+
+    /* Slider handle / value color */
+    .stSlider span { color: #FFFFFF !important; }
+
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# set matplotlib dark background and specify text color explicitly
+# use matplotlib dark background but ensure labels set to white explicitly when plotting
 plt.style.use('dark_background')
 
-st.title("📈 Backtest Studio — Dark Mode (white text)")
+st.title("📈 Backtest Studio — Dark Mode (white labels & inputs)")
 
 # ---- Sidebar (Run + quick env) ----
 with st.sidebar:
@@ -76,7 +110,7 @@ with st.sidebar:
                 status[m] = f"ERROR: {e}"
         st.json(status)
     st.write("---")
-    st.markdown("<div class='muted'>Dark theme with enforced white text. Use daily data for stable runs.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='muted'>Dark theme with enforced white labels & input text. Use daily data for stable runs.</div>", unsafe_allow_html=True)
 
 # ---- Main Inputs ----
 col_left, col_right = st.columns([3,1])
@@ -400,7 +434,7 @@ if run:
         st.text(result.get('error'))
         st.text(result.get('traceback'))
     else:
-        # metrics row (white text guaranteed by CSS)
+        # metrics row (white text enforced by CSS)
         st.markdown("### Summary")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Final equity", f"{result['final_equity']:.2f}")
@@ -409,7 +443,7 @@ if run:
         c4.metric("CAGR %", f"{result['cagr_pct']:.2f}%")
         st.write(f"Sharpe: {result['sharpe']:.3f}  Win%: {result['win_pct']:.2f}  Profit Factor: {result['profit_factor']}")
 
-        # Equity chart (ensure labels white)
+        # Equity chart (dark, labels forced white)
         if eq_df is not None and not eq_df.empty:
             fig, ax = plt.subplots(figsize=(10,4))
             ax.plot(pd.to_datetime(eq_df['date']), eq_df['equity'], label='Equity', linewidth=2, color='#00E5FF')
@@ -439,4 +473,3 @@ if run:
         st.json(result)
 
     preview.write(f"Ticker: **{ticker_norm}** | {len(eq_df) if eq_df is not None else 0} rows downloaded (if any).")
-
