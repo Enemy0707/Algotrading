@@ -1,7 +1,6 @@
 # streamlit_app.py
-# Full replacement: fixes ambiguous-series ValueError by forcing scalar conversion before boolean checks.
-# Dark UI with white labels preserved.
-# Overwrite your existing app file with this and redeploy.
+# Full replacement: fixes recurring ValueError by forcing scalar conversion for all comparisons.
+# Dark UI with enforced white labels. Overwrite current file with this.
 
 import streamlit as st
 import pandas as pd
@@ -17,52 +16,35 @@ try:
 except Exception:
     ta = None
 
-# ---- Page config + strict dark CSS (white text for all inputs & labels) ----
-st.set_page_config(page_title="Backtest Studio (Fixed Scalars)", layout="wide", page_icon="📈")
+# ===== Page config & CSS (dark + white text) =====
+st.set_page_config(page_title="Backtest Studio (Fixed Final)", layout="wide", page_icon="📈")
 st.markdown(
     """
     <style>
-    html, body, .stApp, .block-container {
-      background: #000000 !important;
-      color: #FFFFFF !important;
-    }
-    .stTextInput>div>label, 
-    .stTextInput>label,
-    .stNumberInput>div>label,
-    .stDateInput>div>label,
-    .stSelectbox>div>label,
-    .stSlider>div>label,
-    .stRadio>div>label,
-    .stCheckbox>div>label,
-    .stMultiselect>div>label,
-    label { color: #FFFFFF !important; }
+    html, body, .stApp, .block-container { background: #000000 !important; color: #FFFFFF !important; }
+    .stTextInput>div>label, .stTextInput>label, .stNumberInput>div>label, .stDateInput>div>label,
+    .stSelectbox>div>label, .stSlider>div>label, label { color: #FFFFFF !important; }
     input, textarea, select { color: #FFFFFF !important; background: #0b0b0b !important; border:1px solid #222 !important; }
     ::placeholder { color: #BFC7CC !important; opacity: 1; }
     .section-title { font-size:18px; font-weight:600; color:#FFFFFF; margin-bottom:6px; }
     .muted { color: #BFC7CC; font-size:13px; }
     .card { background:#0b0b0b; padding:12px; border-radius:8px; border:1px solid #222; color:#FFFFFF; }
     .stButton>button, .stDownloadButton>button { background-color:#1f2937 !important; color:#FFFFFF !important; border-radius:6px !important; }
-    .stDownloadButton>button:hover { background-color:#272f3a !important; }
-    .stMetric > div { color: #FFFFFF !important; }
     .stDataFrame table thead th { color: #FFFFFF !important; background: #0f1720 !important; }
-    a { color: #7FDBFF !important; }
     pre, code { color: #E6E6E6 !important; background: #0b0b0b !important; }
-    .stSlider span { color: #FFFFFF !important; }
     </style>
-    """,
-    unsafe_allow_html=True
+    """, unsafe_allow_html=True
 )
+plt.style.use('dark_background')  # dark matplotlib
 
-plt.style.use('dark_background')  # ensure matplotlib dark style
+st.title("📈 Backtest Studio — Final Fix (Dark / White text)")
 
-st.title("📈 Backtest Studio — Fixed (safe scalar checks)")
-
-# ---------------- Sidebar ----------------
+# ===== Sidebar =====
 with st.sidebar:
     st.header("Run")
     run = st.button("🚀 Run Backtest")
     st.write("---")
-    if st.button("Import & Env Test"):
+    if st.button("Env Test"):
         modules = ["streamlit","pandas","numpy","yfinance","matplotlib"]
         env = {}
         for m in modules:
@@ -72,18 +54,17 @@ with st.sidebar:
             except Exception as e:
                 env[m] = f"error: {e}"
         st.json(env)
-    st.markdown("<div class='muted'>This build forces scalar conversion before any boolean test to avoid 'Series is ambiguous' errors.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='muted'>This build forces scalar conversions before comparisons.</div>", unsafe_allow_html=True)
 
-# ---------------- Main Inputs ----------------
+# ===== Main UI Inputs =====
 col_left, col_right = st.columns([3,1])
-
 with col_left:
     st.markdown('<div class="section-title">General</div>', unsafe_allow_html=True)
     raw_ticker = st.text_input("Ticker / Symbol (e.g. ACC, RELIANCE, NIFTY)", value="ACC")
     start_date = st.date_input("Start Date", value=dt.date(2021,9,30))
     end_date = st.date_input("End Date", value=dt.date.today())
     initial_capital = st.number_input("Initial Capital", value=100000.0, format="%.2f")
-    capital_alloc_pct = st.slider("Capital Allocation per Trade (%)", 1, 100, 10)/100.0
+    capital_alloc_pct = st.slider("Capital Allocation per Trade (%)", 1, 100, 10) / 100.0
     max_open_positions = st.number_input("Max Open Positions", value=3, min_value=1)
     max_hold_days = st.number_input("Max Hold Days", value=10, min_value=1)
 
@@ -102,7 +83,7 @@ with col_left:
     elif entry_method == 'Momentum (prior-day)':
         prior_day_thr = st.number_input("Prior-Day Return Entry Threshold (%)", value=0.5)/100.0
     elif entry_method == 'Custom (simple)':
-        custom_rule = st.text_input("Custom rule (example: df['Close']>df['Close'].shift(1))", value="df['Close']>df['Close'].shift(1)")
+        custom_rule = st.text_input("Custom rule (pandas expression)", value="df['Close']>df['Close'].shift(1)")
 
     st.markdown('<div class="section-title">Exit & Risk</div>', unsafe_allow_html=True)
     profit_target = st.number_input("Profit Target (%)", value=5.0)/100.0
@@ -120,11 +101,11 @@ with col_left:
     taxes_pct = st.number_input("Taxes (%)", value=0.0)/100.0
 
 with col_right:
-    st.markdown('<div class="section-title">Preview</div>', unsafe_allow_html=True)
-    st.markdown('<div class="card">Set parameters on the left, then click <b>Run Backtest</b> in the sidebar.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Quick Info</div>', unsafe_allow_html=True)
+    st.markdown('<div class="card">Set inputs and hit <b>Run Backtest</b> in the sidebar.</div>', unsafe_allow_html=True)
     preview = st.empty()
 
-# ---------------- Helpers ----------------
+# ===== Helpers =====
 def normalize_ticker(t: str) -> str:
     if not t or not str(t).strip():
         raise ValueError("Ticker required")
@@ -153,10 +134,7 @@ def compute_max_drawdown(series: pd.Series) -> float:
     return float(dd.max())
 
 def to_scalar(x):
-    """
-    Convert x (scalar, pd.Series, np.ndarray, pd.Index) to a single float scalar.
-    Returns np.nan for None/empty/invalid.
-    """
+    """Return a float scalar from possible Series/ndarray/scalar. Return np.nan for invalid."""
     if x is None:
         return np.nan
     if isinstance(x, (pd.Series, pd.Index)):
@@ -187,7 +165,7 @@ def to_scalar(x):
     except Exception:
         return np.nan
 
-# ---------------- Backtest engine ----------------
+# ===== Backtesting engine with robust scalar guards =====
 def run_backtest_engine(cfg):
     try:
         df = fetch_data(cfg['ticker_norm'], cfg['start'], cfg['end'])
@@ -209,13 +187,13 @@ def run_backtest_engine(cfg):
         df['ATR'] = np.nan
 
     cash = float(cfg['initial_capital'])
-    positions = []
+    positions = []  # store dicts with scalar values only
     equity_points = []
     trades = []
     monthly_realized = {}
     month_start_equity = {}
     consecutive_losses = 0
-    allowed_min_equity = cfg['initial_capital'] * (1.0 - cfg['max_overall_drawdown_pct'])
+    allowed_min = cfg['initial_capital'] * (1.0 - cfg['max_overall_drawdown_pct'])
 
     for idx, row in df.iterrows():
         today = idx.date()
@@ -225,104 +203,123 @@ def run_backtest_engine(cfg):
             monthly_realized[month_key] = 0.0
             month_start_equity[month_key] = cash + sum([p['shares']*row['Close'] for p in positions])
 
-        # existing positions
-        intr_low = row['Low'] if 'Low' in row.index else min(row['Open'], row['Close'])
-        intr_high = row['High'] if 'High' in row.index else max(row['Open'], row['Close'])
+        # compute scalar intraday low/high
+        intr_low = to_scalar(row.get('Low', np.nan))
+        if np.isnan(intr_low):
+            intr_low = min(to_scalar(row.get('Open', np.nan)), to_scalar(row.get('Close', np.nan)))
+        intr_high = to_scalar(row.get('High', np.nan))
+        if np.isnan(intr_high):
+            intr_high = max(to_scalar(row.get('Open', np.nan)), to_scalar(row.get('Close', np.nan)))
+
+        # === check existing positions (use scalar comparisons) ===
         remaining = []
         for pos in positions:
-            exit_price = None; reason = None
-            if intr_low <= pos['stop_price']:
-                exit_price = pos['stop_price']; reason = 'stop'
-            elif pos.get('target_price') is not None and intr_high >= pos['target_price']:
-                exit_price = pos['target_price']; reason = 'target'
+            stop_price_s = to_scalar(pos.get('stop_price', np.nan))
+            target_price_s = to_scalar(pos.get('target_price', np.nan))
+            entry_price_s = to_scalar(pos.get('entry_price', np.nan))
+            shares_s = int(to_scalar(pos.get('shares', 0)))
+
+            exit_price = None
+            reason = None
+            # only compare if stop_price is scalar
+            if not np.isnan(stop_price_s) and not np.isnan(intr_low) and intr_low <= stop_price_s:
+                exit_price = stop_price_s; reason = 'stop'
+            elif (not np.isnan(target_price_s)) and (not np.isnan(intr_high)) and intr_high >= target_price_s:
+                exit_price = target_price_s; reason = 'target'
             else:
                 hold_days = (today - pos['entry_date']).days
                 if hold_days >= cfg['max_hold_days']:
-                    exit_price = row['Close']; reason = 'time_exit'
+                    exit_price = to_scalar(row.get('Close', np.nan)); reason = 'time_exit'
+
             if exit_price is not None:
-                pnl = (exit_price - pos['entry_price']) * pos['shares']
-                cost_exit = cfg['brokerage'] + abs(exit_price*pos['shares'])*(cfg['slippage_pct'] + cfg['exchange_fee_pct'] + cfg['taxes_pct'])
+                pnl = (exit_price - entry_price_s) * shares_s
+                cost_exit = cfg['brokerage'] + abs(exit_price*shares_s) * (cfg['slippage_pct'] + cfg['exchange_fee_pct'] + cfg['taxes_pct'])
                 pnl_net = pnl - cost_exit
-                cash += pos['shares'] * exit_price - cost_exit
+                cash += shares_s * exit_price - cost_exit
                 trades.append({'entry_date': pos['entry_date'].isoformat(),
                                'exit_date': today.isoformat(),
-                               'entry_price': pos['entry_price'],
+                               'entry_price': entry_price_s,
                                'exit_price': exit_price,
-                               'shares': pos['shares'],
+                               'shares': shares_s,
                                'pnl': pnl_net,
                                'reason': reason})
                 monthly_realized[month_key] += pnl_net
-                if pnl_net < 0: consecutive_losses += 1
-                else: consecutive_losses = 0
+                if pnl_net < 0:
+                    consecutive_losses += 1
+                else:
+                    consecutive_losses = 0
             else:
                 remaining.append(pos)
         positions = remaining
 
         # equity snapshot
-        equity_now = cash + sum([p['shares'] * row['Close'] for p in positions])
+        equity_now = cash + sum([p['shares'] * to_scalar(row['Close']) for p in positions]) if len(positions)>0 else cash
         equity_points.append({'date': idx, 'equity': equity_now})
 
         # monthly pause
         paused = monthly_realized[month_key] >= (month_start_equity[month_key] * cfg['monthly_target_pct'])
 
-        # emergency check
-        worst_equity = cash + sum([(p['stop_price'] if p['stop_price'] < intr_low else row['Close']) * p['shares'] for p in positions])
-        if worst_equity < allowed_min_equity:
+        # emergency close if worst-case below allowed_min
+        worst_equity = cash + sum([ (p['stop_price'] if (p['stop_price'] is not None and p['stop_price'] < intr_low) else to_scalar(row['Close'])) * p['shares'] for p in positions ]) if len(positions)>0 else cash
+        if worst_equity < allowed_min:
+            # emergency close at close
             for pos in positions:
-                exit_price = row['Close']
-                pnl = (exit_price - pos['entry_price']) * pos['shares']
-                cost_exit = cfg['brokerage'] + abs(exit_price*pos['shares'])*(cfg['slippage_pct'] + cfg['exchange_fee_pct'] + cfg['taxes_pct'])
+                exit_price = to_scalar(row.get('Close', np.nan))
+                entry_price_s = to_scalar(pos['entry_price'])
+                shares_s = int(pos['shares'])
+                pnl = (exit_price - entry_price_s) * shares_s
+                cost_exit = cfg['brokerage'] + abs(exit_price*shares_s)*(cfg['slippage_pct']+cfg['exchange_fee_pct']+cfg['taxes_pct'])
                 pnl_net = pnl - cost_exit
-                cash += pos['shares'] * exit_price - cost_exit
+                cash += shares_s * exit_price - cost_exit
                 trades.append({'entry_date': pos['entry_date'].isoformat(),
                                'exit_date': today.isoformat(),
-                               'entry_price': pos['entry_price'],
+                               'entry_price': entry_price_s,
                                'exit_price': exit_price,
-                               'shares': pos['shares'],
+                               'shares': shares_s,
                                'pnl': pnl_net,
                                'reason': 'emergency_close'})
             positions = []
             equity_now = cash
-            if equity_now < allowed_min_equity:
+            if equity_now < allowed_min:
                 break
 
-        # ENTRY logic: convert to scalars before comparisons
+        # === ENTRY logic (scalar-safe) ===
         if (not paused) and len(positions) < cfg['max_open_positions'] and consecutive_losses < cfg['max_consecutive_losses']:
-            signal = False; entry_price = None
+            signal = False
+            entry_price = None
 
             if cfg['entry_method'] == 'Momentum (prior-day)':
-                pr_raw = row.get('prior_ret', np.nan)
-                pr = to_scalar(pr_raw)
-                if not np.isnan(pr) and pr > float(cfg.get('prior_day_thr', 0.0)):
-                    signal = True; entry_price = to_scalar(row.get('Open', np.nan))
+                pr = to_scalar(row.get('prior_ret', np.nan))
+                if (not np.isnan(pr)) and pr > float(cfg.get('prior_day_thr') or 0.0):
+                    entry_price = to_scalar(row.get('Open', np.nan)); signal = True
 
             elif cfg['entry_method'] == 'MA crossover':
                 ms = to_scalar(row.get('MA_short', np.nan)); ml = to_scalar(row.get('MA_long', np.nan))
-                if (not np.isnan(ms)) and (not np.isnan(ml)) and (ms > ml):
-                    signal = True; entry_price = to_scalar(row.get('Open', np.nan))
+                if (not np.isnan(ms)) and (not np.isnan(ml)) and ms > ml:
+                    entry_price = to_scalar(row.get('Open', np.nan)); signal = True
 
             elif cfg['entry_method'] == 'RSI':
                 rsi_val = to_scalar(row.get('RSI', np.nan))
-                if not np.isnan(rsi_val) and rsi_val < float(cfg.get('rsi_enter_thr', 0)):
-                    signal = True; entry_price = to_scalar(row.get('Open', np.nan))
+                if (not np.isnan(rsi_val)) and rsi_val < float(cfg.get('rsi_enter_thr') or 0):
+                    entry_price = to_scalar(row.get('Open', np.nan)); signal = True
 
             elif cfg['entry_method'] == 'Custom (simple)':
                 try:
                     local = df.loc[:idx].copy()
                     cond = eval(cfg.get('custom_rule',''), {"df": local, "np": np, "pd": pd})
-                    if isinstance(cond, (pd.Series, pd.Index, np.ndarray)):
+                    if isinstance(cond, (pd.Series, np.ndarray)):
                         cond_val = bool(to_scalar(cond))
                     else:
                         cond_val = bool(cond)
                     if cond_val:
-                        signal = True; entry_price = to_scalar(row.get('Open', np.nan))
+                        entry_price = to_scalar(row.get('Open', np.nan)); signal = True
                 except Exception:
                     signal = False
 
-            # sizing (all on scalars)
-            if signal and entry_price is not None and not np.isnan(entry_price):
+            if signal and (entry_price is not None) and (not np.isnan(entry_price)):
+                # sizing
                 if cfg['sizing_method'] == '% of Capital':
-                    cap_for_trade = cfg['capital_alloc_pct'] * (cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*row['Close'] for p in positions])))
+                    cap_for_trade = cfg['capital_alloc_pct'] * (cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*to_scalar(row['Close']) for p in positions])))
                     stop_price = entry_price * (1.0 - cfg['per_trade_stop'])
                     shares_calc = cap_for_trade // entry_price if entry_price>0 else 0
                     shares = int(to_scalar(shares_calc))
@@ -331,29 +328,31 @@ def run_backtest_engine(cfg):
                 elif cfg['sizing_method'] == 'Volatility (ATR)':
                     atr_val = to_scalar(row.get('ATR', np.nan))
                     stop_price = entry_price - max(atr_val if not np.isnan(atr_val) else 0.0, entry_price*cfg['per_trade_stop'])
-                    cap_for_trade = cfg['capital_alloc_pct'] * (cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*row['Close'] for p in positions])))
+                    cap_for_trade = cfg['capital_alloc_pct'] * (cash if not cfg['reinvest_profits'] else (cash + sum([p['shares']*to_scalar(row['Close']) for p in positions])))
                     shares_calc = cap_for_trade // entry_price if entry_price>0 else 0
                     shares = int(to_scalar(shares_calc))
                 else:
                     shares = 0; stop_price = entry_price * (1.0 - cfg['per_trade_stop'])
 
-                # ensure shares and numeric values are scalars before boolean tests
+                # convert to scalars before boolean test
                 shares_s = int(to_scalar(shares)) if not np.isnan(to_scalar(shares)) else 0
                 entry_price_s = to_scalar(entry_price)
                 stop_price_s = to_scalar(stop_price)
 
                 if shares_s > 0 and (entry_price_s * shares_s) <= float(cash):
                     hypothetical_cash = float(cash) - (shares_s * entry_price_s)
-                    worst_if_stop = hypothetical_cash + (shares_s * stop_price_s) + sum([p['shares'] * row['Close'] for p in positions])
-                    if worst_if_stop < allowed_min_equity:
+                    worst_if_stop = hypothetical_cash + (shares_s * stop_price_s) + sum([p['shares'] * to_scalar(row['Close']) for p in positions]) if len(positions)>0 else hypothetical_cash + (shares_s * stop_price_s)
+                    if worst_if_stop < allowed_min:
                         trades.append({'entry_date': today.isoformat(), 'exit_date': None, 'entry_price': entry_price_s, 'exit_price': None, 'shares': 0, 'pnl': 0.0, 'reason': 'entry_skipped_would_breach_overall_drawdown'})
                     else:
                         cost_entry = cfg['brokerage'] + abs(entry_price_s * shares_s) * (cfg['slippage_pct'] + cfg['exchange_fee_pct'] + cfg['taxes_pct'])
                         cash -= (shares_s * entry_price_s) + cost_entry
-                        positions.append({'entry_date': today, 'entry_price': entry_price_s, 'shares': shares_s, 'stop_price': stop_price_s, 'target_price': entry_price_s * (1 + cfg['profit_target'])})
-                        trades.append({'entry_date': today.isoformat(), 'exit_date': None, 'entry_price': entry_price_s, 'exit_price': None, 'shares': shares_s, 'pnl': None, 'reason': 'entry'})
+                        # store scalars only
+                        positions.append({'entry_date': today, 'entry_price': float(entry_price_s), 'shares': int(shares_s),
+                                          'stop_price': float(stop_price_s), 'target_price': float(entry_price_s*(1+cfg['profit_target']))})
+                        trades.append({'entry_date': today.isoformat(), 'exit_date': None, 'entry_price': float(entry_price_s), 'exit_price': None, 'shares': int(shares_s), 'pnl': None, 'reason': 'entry'})
 
-    # finalize outputs
+    # finalize outputs & metrics
     eq_df = pd.DataFrame(equity_points)
     if not eq_df.empty:
         eq_df = eq_df.set_index('date')
@@ -396,12 +395,12 @@ def run_backtest_engine(cfg):
     }
     return report, report['equity_df'], report['trades_df']
 
-# ---------------- Run handler ----------------
+# ===== Run handler =====
 if run:
     try:
         ticker_norm = normalize_ticker(raw_ticker)
     except Exception as e:
-        st.error(f"Ticker error: {e}")
+        st.error(f"Ticker normalization error: {e}")
         st.stop()
 
     cfg = {
@@ -439,7 +438,7 @@ if run:
         result, eq_df, trades_df = run_backtest_engine(cfg)
 
     if isinstance(result, dict) and result.get('error'):
-        st.error("Backtest error (see details):")
+        st.error("Backtest error (details):")
         st.text(result.get('error'))
         st.text(result.get('traceback'))
     else:
@@ -475,7 +474,5 @@ if run:
             eq_df.to_csv(buf2, index=False)
             st.download_button("Download equity_curve.csv", buf2.getvalue().encode(), file_name="equity_curve.csv")
 
-        st.markdown("### Report JSON")
-        st.json(result)
+    preview.write(f"Ticker: **{ticker_norm}** | rows: {len(eq_df) if eq_df is not None else 0}")
 
-    preview.write(f"Ticker: **{ticker_norm}** | {len(eq_df) if eq_df is not None else 0} rows downloaded (if any).")
